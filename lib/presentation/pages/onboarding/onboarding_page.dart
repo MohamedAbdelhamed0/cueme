@@ -73,6 +73,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                   _buildSlide(
                     context: context,
                     icon: Icons.alarm_on_rounded,
+                    imageAsset: 'assets/icon/app_icon.png',
                     title: 'Your routines,\non time.',
                     description:
                         'CueMe helps you stay on track with pills, vitamins, skincare, and daily habits with calm, reliable local reminders.',
@@ -147,6 +148,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
   Widget _buildSlide({
     required BuildContext context,
     required IconData icon,
+    String? imageAsset,
     required String title,
     required String description,
     required List<String> features,
@@ -164,15 +166,35 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Spacer(),
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.15),
-              borderRadius: AppTokens.borderRadiusLg,
+          if (imageAsset != null)
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset(imageAsset, fit: BoxFit.cover),
+              ),
+            )
+          else
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.15),
+                borderRadius: AppTokens.borderRadiusLg,
+              ),
+              child: Icon(icon, size: 36, color: AppColors.primary),
             ),
-            child: Icon(icon, size: 36, color: AppColors.primary),
-          ),
           const SizedBox(height: AppTokens.s24),
           Text(
             title,

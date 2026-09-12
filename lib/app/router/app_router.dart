@@ -18,21 +18,33 @@ final GlobalKey<NavigatorState> _routinesNavigatorKey = GlobalKey<NavigatorState
 final GlobalKey<NavigatorState> _historyNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'historyNav');
 final GlobalKey<NavigatorState> _settingsNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'settingsNav');
 
+class RouterNotifier extends ChangeNotifier {
+  final Ref _ref;
+  RouterNotifier(this._ref) {
+    _ref.listen(appSettingsStreamProvider, (_, _) => notifyListeners());
+  }
+
+  String? redirect(BuildContext context, GoRouterState state) {
+    final settings = _ref.read(appSettingsStreamProvider).value;
+    if (settings != null && !settings.onboardingCompleted) {
+      if (!state.matchedLocation.startsWith('/onboarding')) {
+        return '/onboarding';
+      }
+    }
+    return null;
+  }
+}
+
+final routerNotifierProvider = Provider<RouterNotifier>((ref) => RouterNotifier(ref));
+
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final settingsAsync = ref.watch(appSettingsStreamProvider);
+  final notifier = ref.watch(routerNotifierProvider);
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
+    refreshListenable: notifier,
     initialLocation: '/today',
-    redirect: (context, state) {
-      final settings = settingsAsync.value;
-      if (settings != null && !settings.onboardingCompleted) {
-        if (!state.matchedLocation.startsWith('/onboarding')) {
-          return '/onboarding';
-        }
-      }
-      return null;
-    },
+    redirect: notifier.redirect,
     routes: [
       GoRoute(
         path: '/onboarding',
