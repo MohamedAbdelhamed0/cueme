@@ -9,7 +9,7 @@ class NotificationSyncService {
 
   NotificationSyncService(this._routineRepository, this._scheduler);
 
-  Future<void> reconcile() async {
+  Future<void> reconcile({bool rebuildAll = false}) async {
     try {
       AppLogger.info('NotificationSyncService', 'Starting schedule reconciliation...');
 
@@ -19,8 +19,8 @@ class NotificationSyncService {
 
       final activeRoutines = await _routineRepository.getAllActive();
 
-      if (timezoneChanged) {
-        AppLogger.info('NotificationSyncService', 'Timezone changed from $_lastKnownTimezone to $currentTimezone. Rescheduling all.');
+      if (timezoneChanged || rebuildAll) {
+        AppLogger.info('NotificationSyncService', 'Rebuilding notification schedules for $currentTimezone.');
         await _scheduler.rescheduleAll(activeRoutines);
       } else {
         // Refresh schedules for all active routines

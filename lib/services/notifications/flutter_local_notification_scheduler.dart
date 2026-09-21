@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/services.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -16,27 +18,21 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
 
   FlutterLocalNotificationScheduler({
     FlutterLocalNotificationsPlugin? notificationsPlugin,
-  }) : _notificationsPlugin = notificationsPlugin ?? FlutterLocalNotificationsPlugin();
+  }) : _notificationsPlugin =
+           notificationsPlugin ?? FlutterLocalNotificationsPlugin();
 
   @override
-  Future<void> initialize({void Function(String payload)? onNotificationTapped}) async {
+  Future<void> initialize({
+    void Function(String payload)? onNotificationTapped,
+  }) async {
     _onNotificationTapped = onNotificationTapped;
 
-    try {
-      tz.initializeTimeZones();
-      // Set to local timezone if possible
-      final locationName = DateTime.now().timeZoneName;
-      try {
-        tz.setLocalLocation(tz.getLocation(locationName));
-      } catch (_) {
-        // Fallback to UTC or local offset if name is an abbreviation
-        tz.setLocalLocation(tz.local);
-      }
-    } catch (e) {
-      AppLogger.warn('NotificationScheduler', 'Failed to initialize timezone', e);
-    }
+    tz.initializeTimeZones();
+    await _refreshTimezone();
 
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const darwinSettings = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -58,7 +54,10 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
       onDidReceiveNotificationResponse: (response) {
         final payload = response.payload;
         if (payload != null && payload.isNotEmpty) {
-          AppLogger.info('NotificationScheduler', 'Notification tapped with payload: $payload');
+          AppLogger.info(
+            'NotificationScheduler',
+            'Notification tapped with payload: $payload',
+          );
           _onNotificationTapped?.call(payload);
         }
       },
@@ -68,13 +67,17 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
   @override
   Future<bool> requestNotificationPermission() async {
     if (Platform.isAndroid) {
-      final androidImpl = _notificationsPlugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
+      final androidImpl = _notificationsPlugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
       final granted = await androidImpl?.requestNotificationsPermission();
       return granted ?? false;
     } else if (Platform.isIOS) {
-      final iosImpl = _notificationsPlugin.resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin>();
+      final iosImpl = _notificationsPlugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >();
       final granted = await iosImpl?.requestPermissions(
         alert: true,
         badge: true,
@@ -88,10 +91,15 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
   @override
   Future<ExactAlarmCapability> getExactAlarmCapability() async {
     if (Platform.isAndroid) {
-      final androidImpl = _notificationsPlugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      final canExact = await androidImpl?.canScheduleExactNotifications() ?? false;
-      return canExact ? ExactAlarmCapability.available : ExactAlarmCapability.needsPermission;
+      final androidImpl = _notificationsPlugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      final canExact =
+          await androidImpl?.canScheduleExactNotifications() ?? false;
+      return canExact
+          ? ExactAlarmCapability.available
+          : ExactAlarmCapability.needsPermission;
     }
     return ExactAlarmCapability.available;
   }
@@ -103,6 +111,8 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
       return;
     }
 
+    await _refreshTimezone();
+    final notificationDetails = await _buildNotificationDetails(routine);
     // Cancel existing before rescheduling to avoid duplicates
     await cancelRoutine(routine);
 
@@ -121,7 +131,11 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         // Base notificationId multiplied by 10 plus weekday
         final id = (reminderTime.notificationId * 10) + weekday;
 
-        final nextDate = _nextInstanceOfWeekdayAndTime(weekday, reminderTime.hour, reminderTime.minute);
+        final nextDate = _nextInstanceOfWeekdayAndTime(
+          weekday,
+          reminderTime.hour,
+          reminderTime.minute,
+        );
 
         // Check date bounds
         if (routine.endDate != null && nextDate.isAfter(routine.endDate!)) {
@@ -136,7 +150,9 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         if (routine.instructions != null && routine.instructions!.isNotEmpty) {
           bodyParts.add(routine.instructions!);
         }
-        final body = bodyParts.isNotEmpty ? bodyParts.join(' • ') : 'Time for your ${routine.category.displayName.toLowerCase()}';
+        final body = bodyParts.isNotEmpty
+            ? bodyParts.join(' • ')
+            : 'Time for your ${routine.category.displayName.toLowerCase()}';
 
         final payload = jsonEncode({
           'v': AppConstants.notificationPayloadVersion,
@@ -145,8 +161,6 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
           'reminderTimeId': reminderTime.id,
           'scheduledFor': nextDate.toIso8601String(),
         });
-
-        final notificationDetails = _buildNotificationDetails(routine);
 
         try {
           await _notificationsPlugin.zonedSchedule(
@@ -159,9 +173,17 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
             matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
             payload: payload,
           );
-          AppLogger.debug('NotificationScheduler', 'Scheduled notification id=$id at $nextDate');
+          AppLogger.debug(
+            'NotificationScheduler',
+            'Scheduled notification id=$id at $nextDate',
+          );
         } catch (e) {
-          AppLogger.warn('NotificationScheduler', 'Failed to schedule notification id=$id', e);
+          AppLogger.warn(
+            'NotificationScheduler',
+            'Failed to schedule notification id=$id',
+            e,
+          );
+          rethrow;
         }
       }
     }
@@ -181,15 +203,25 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
   Future<void> cancelByNotificationId(int notificationId) async {
     try {
       await _notificationsPlugin.cancel(id: notificationId);
-      AppLogger.debug('NotificationScheduler', 'Cancelled notificationId=$notificationId');
+      AppLogger.debug(
+        'NotificationScheduler',
+        'Cancelled notificationId=$notificationId',
+      );
     } catch (e) {
-      AppLogger.warn('NotificationScheduler', 'Error cancelling notification $notificationId', e);
+      AppLogger.warn(
+        'NotificationScheduler',
+        'Error cancelling notification $notificationId',
+        e,
+      );
     }
   }
 
   @override
   Future<void> rescheduleAll(List<Routine> activeRoutines) async {
-    AppLogger.info('NotificationScheduler', 'Rescheduling all active routines (${activeRoutines.length})');
+    AppLogger.info(
+      'NotificationScheduler',
+      'Rescheduling all active routines (${activeRoutines.length})',
+    );
     await _notificationsPlugin.cancelAll();
     for (final routine in activeRoutines) {
       await scheduleRoutine(routine);
@@ -198,6 +230,8 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
 
   @override
   Future<void> testNotification() async {
+    await _refreshTimezone();
+    final exactCapability = await getExactAlarmCapability();
     const androidDetails = AndroidNotificationDetails(
       'cueme_test_channel',
       'Test Reminders',
@@ -219,25 +253,51 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
       iOS: iosDetails,
     );
 
-    await _notificationsPlugin.show(
+    await _notificationsPlugin.zonedSchedule(
       id: 999999,
       title: 'Test Reminder from CueMe',
-      body: 'Notifications and alerts are working perfectly!',
+      body: 'This reminder was scheduled while CueMe was open.',
+      scheduledDate: tz.TZDateTime.now(
+        tz.local,
+      ).add(const Duration(seconds: 30)),
+      androidScheduleMode: exactCapability == ExactAlarmCapability.available
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       notificationDetails: details,
       payload: jsonEncode({'v': 1, 'type': 'test'}),
     );
   }
 
-  NotificationDetails _buildNotificationDetails(Routine routine) {
+  Future<void> _refreshTimezone() async {
+    final deviceTimezone = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(deviceTimezone.identifier));
+  }
+
+  Future<NotificationDetails> _buildNotificationDetails(Routine routine) async {
+    String? androidSoundUri;
+    if (Platform.isAndroid &&
+        routine.soundMode == ReminderSoundMode.recorded &&
+        routine.audioRecording != null) {
+      androidSoundUri = await const MethodChannel('cueme/notification_sounds')
+          .invokeMethod<String>('getSoundUri', {
+            'path': routine.audioRecording!.localPath,
+          });
+    }
     // 1. Android channel versioning
     final revision = routine.audioRecording?.revision ?? 1;
-    final channelId = routine.soundMode == ReminderSoundMode.recorded && routine.audioRecording != null
-        ? 'routine_${routine.id}_sound_$revision'
-        : (routine.soundMode == ReminderSoundMode.silent ? 'cueme_silent' : 'cueme_default');
+    final channelId =
+        routine.soundMode == ReminderSoundMode.recorded &&
+            routine.audioRecording != null
+        ? 'routine_${routine.id}_sound_${revision}_v2'
+        : (routine.soundMode == ReminderSoundMode.silent
+              ? 'cueme_silent'
+              : 'cueme_default');
 
     final channelName = routine.soundMode == ReminderSoundMode.recorded
         ? 'Routine ${routine.name} (Custom Voice)'
-        : (routine.soundMode == ReminderSoundMode.silent ? 'Silent Reminders' : 'Routine Reminders');
+        : (routine.soundMode == ReminderSoundMode.silent
+              ? 'Silent Reminders'
+              : 'Routine Reminders');
 
     final soundMode = routine.soundMode;
 
@@ -251,7 +311,8 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         playSound: false,
         enableVibration: routine.vibrationEnabled,
       );
-    } else if (soundMode == ReminderSoundMode.recorded && routine.audioRecording != null) {
+    } else if (soundMode == ReminderSoundMode.recorded &&
+        routine.audioRecording != null) {
       // Uri sound or versioned channel
       androidDetails = AndroidNotificationDetails(
         channelId,
@@ -262,8 +323,8 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         playSound: true,
         enableVibration: routine.vibrationEnabled,
         // Fallback to system if audio file unavailable on device
-        sound: routine.audioRecording?.localPath != null
-            ? UriAndroidNotificationSound(routine.audioRecording!.localPath)
+        sound: androidSoundUri != null
+            ? UriAndroidNotificationSound(androidSoundUri)
             : null,
         actions: const [
           AndroidNotificationAction('action_done', 'Done'),
@@ -294,7 +355,8 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         presentBadge: true,
         presentSound: false,
       );
-    } else if (soundMode == ReminderSoundMode.recorded && routine.audioRecording?.iosSoundFilename != null) {
+    } else if (soundMode == ReminderSoundMode.recorded &&
+        routine.audioRecording?.iosSoundFilename != null) {
       iosDetails = DarwinNotificationDetails(
         presentAlert: true,
         presentBadge: true,
@@ -309,13 +371,14 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
       );
     }
 
-    return NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
+    return NotificationDetails(android: androidDetails, iOS: iosDetails);
   }
 
-  tz.TZDateTime _nextInstanceOfWeekdayAndTime(int targetWeekday, int hour, int minute) {
+  tz.TZDateTime _nextInstanceOfWeekdayAndTime(
+    int targetWeekday,
+    int hour,
+    int minute,
+  ) {
     final now = tz.TZDateTime.now(tz.local);
     var scheduledDate = tz.TZDateTime(
       tz.local,

@@ -142,13 +142,13 @@ class SettingsPage extends ConsumerWidget {
                   ListTile(
                     leading: const Icon(Icons.notifications_active_outlined),
                     title: const Text('Send Test Reminder'),
-                    subtitle: const Text('Verify that alerts pop up cleanly'),
+                      subtitle: const Text('Schedule an alert in 30 seconds, then close the app'),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () async {
                       await controller.triggerTestNotification();
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Test reminder scheduled! Check your notifications.')),
+                            const SnackBar(content: Text('Test reminder scheduled for 30 seconds. Close CueMe to check background delivery.')),
                         );
                       }
                     },

@@ -29,7 +29,7 @@ Future<BootstrapResult> bootstrapApp({
     // Run reconciliation in background without blocking app render
     Future.microtask(() async {
       final syncService = container.read(notificationSyncServiceProvider);
-      await syncService.reconcile();
+      await syncService.reconcile(rebuildAll: true);
     });
   } catch (e, st) {
     AppLogger.error('Bootstrap', 'Initialization error', e, st);

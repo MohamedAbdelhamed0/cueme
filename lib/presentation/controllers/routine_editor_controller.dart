@@ -382,11 +382,17 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
       );
 
       // Save to database
+      final previousRoutine = state.existingId == null
+          ? null
+          : await routineRepo.getById(routineId);
       await routineRepo.saveRoutine(routine);
 
       // Re-schedule notifications
       String? schedulerWarning;
       try {
+        if (previousRoutine != null) {
+          await scheduler.cancelRoutine(previousRoutine);
+        }
         await scheduler.scheduleRoutine(routine);
       } catch (e) {
         AppLogger.warn('RoutineEditor', 'Scheduling failed after DB commit', e);

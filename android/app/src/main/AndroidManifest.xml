@@ -8,8 +8,17 @@
 
     <application
         android:label="cueme"
-        android:name="${applicationName}"
+        android:name=".CueMeApplication"
         android:icon="@mipmap/ic_launcher">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.notification_sounds"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/notification_sound_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"
