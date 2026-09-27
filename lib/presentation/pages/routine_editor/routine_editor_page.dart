@@ -67,9 +67,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.3,
-            ),
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.3,
+        ),
       ),
     );
   }
@@ -83,9 +83,12 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final draft = ref.watch(routineEditorControllerProvider(_initialRoutine));
-    final controller = ref.read(routineEditorControllerProvider(_initialRoutine).notifier);
+    final controller = ref.read(
+      routineEditorControllerProvider(_initialRoutine).notifier,
+    );
 
     final isEdit = widget.routineId != null;
+    final selectedColor = AppColors.getColorByKey(draft.colorKey);
 
     return Scaffold(
       appBar: AppBar(
@@ -96,9 +99,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
               final result = await controller.saveRoutine();
               if (result.success) {
                 if (result.warning != null && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(result.warning!)),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text(result.warning!)));
                 }
                 if (context.mounted) context.pop();
               } else {
@@ -112,17 +115,31 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                 }
               }
             },
-            child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            child: const Text(
+              'Save',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
           ),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(AppTokens.s20, 0, AppTokens.s20, AppTokens.s48),
+        padding: const EdgeInsets.fromLTRB(
+          AppTokens.s20,
+          0,
+          AppTokens.s20,
+          AppTokens.s48,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _CategoryHero(
+              category: draft.category,
+              color: selectedColor,
+              isEdit: isEdit,
+            ),
+
             // Section A: WHAT
-            _buildSectionHeader('Section A — What'),
+            _buildSectionHeader('What are you planning?'),
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -136,20 +153,25 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
             // Category picker
             Text('Category', style: theme.textTheme.labelMedium),
             const SizedBox(height: AppTokens.s8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: RoutineCategory.values.map((cat) {
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: RoutineCategory.values.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: AppTokens.s12,
+                mainAxisSpacing: AppTokens.s12,
+                childAspectRatio: 1.34,
+              ),
+              itemBuilder: (context, index) {
+                final cat = RoutineCategory.values[index];
                 final isSelected = draft.category == cat;
-                return ChoiceChip(
-                  avatar: Icon(cat.icon, size: 16),
-                  label: Text(cat.displayName),
+                return _CategoryCard(
+                  category: cat,
                   selected: isSelected,
-                  onSelected: (val) {
-                    if (val) controller.updateCategory(cat);
-                  },
+                  onTap: () => controller.updateCategory(cat),
                 );
-              }).toList(),
+              },
             ),
 
             const SizedBox(height: AppTokens.s16),
@@ -199,16 +221,25 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                         color: isSelected ? Colors.white : Colors.transparent,
                         width: 3,
                       ),
-                      boxShadow: isSelected ? [BoxShadow(color: entry.value.withValues(alpha: 0.5), blurRadius: 8)] : null,
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: entry.value.withValues(alpha: 0.5),
+                                blurRadius: 8,
+                              ),
+                            ]
+                          : null,
                     ),
-                    child: isSelected ? const Icon(Icons.check, size: 18, color: Colors.white) : null,
+                    child: isSelected
+                        ? const Icon(Icons.check, size: 18, color: Colors.white)
+                        : null,
                   ),
                 );
               }).toList(),
             ),
 
             // Section B: WHEN
-            _buildSectionHeader('Section B — When'),
+            _buildSectionHeader('When should CueMe remind you?'),
             // Days of week
             Text('Days of the Week', style: theme.textTheme.labelMedium),
             const SizedBox(height: AppTokens.s8),
@@ -227,7 +258,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                   style: theme.textTheme.labelMedium,
                 ),
                 Text(
-                  draft.times.length == 1 ? '1 time/day' : '${draft.times.length} times/day',
+                  draft.times.length == 1
+                      ? '1 time/day'
+                      : '${draft.times.length} times/day',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     color: AppColors.primary,
@@ -251,7 +284,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                     controller.updateTimeAt(idx, picked);
                   }
                 },
-                onRemove: draft.times.length > 1 ? () => controller.removeTimeAt(idx) : null,
+                onRemove: draft.times.length > 1
+                    ? () => controller.removeTimeAt(idx)
+                    : null,
               );
             }),
             const SizedBox(height: AppTokens.s4),
@@ -268,7 +303,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
               icon: const Icon(Icons.add_rounded),
               label: const Text('Add Another Time'),
               style: OutlinedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: AppTokens.borderRadiusMd),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppTokens.borderRadiusMd,
+                ),
               ),
             ),
 
@@ -288,7 +325,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                       if (picked != null) controller.updateStartDate(picked);
                     },
                     child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Start Date'),
+                      decoration: const InputDecoration(
+                        labelText: 'Start Date',
+                      ),
                       child: Text(draft.startDate.toFormattedDate()),
                     ),
                   ),
@@ -299,7 +338,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                     onTap: () async {
                       final picked = await showDatePicker(
                         context: context,
-                        initialDate: draft.endDate ?? draft.startDate.add(const Duration(days: 30)),
+                        initialDate:
+                            draft.endDate ??
+                            draft.startDate.add(const Duration(days: 30)),
                         firstDate: draft.startDate,
                         lastDate: DateTime(2035),
                       );
@@ -316,7 +357,9 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                             : null,
                       ),
                       child: Text(
-                        draft.endDate != null ? draft.endDate!.toFormattedDate() : 'Ongoing',
+                        draft.endDate != null
+                            ? draft.endDate!.toFormattedDate()
+                            : 'Ongoing',
                       ),
                     ),
                   ),
@@ -325,7 +368,7 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
             ),
 
             // Section C: SOUND
-            _buildSectionHeader('Section C — Reminder Sound'),
+            _buildSectionHeader('Reminder sound'),
             SegmentedButton<ReminderSoundMode>(
               segments: const [
                 ButtonSegment(
@@ -362,7 +405,7 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
               ),
 
             // Section D: BEHAVIOR
-            _buildSectionHeader('Section D — Reminder Behavior'),
+            _buildSectionHeader('Reminder behavior'),
             Container(
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
@@ -391,7 +434,10 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                   if (draft.snoozeEnabled) ...[
                     const Divider(height: 1),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -400,13 +446,27 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
                             value: draft.snoozeMinutes,
                             underline: const SizedBox(),
                             items: const [
-                              DropdownMenuItem(value: 5, child: Text('5 minutes')),
-                              DropdownMenuItem(value: 10, child: Text('10 minutes')),
-                              DropdownMenuItem(value: 15, child: Text('15 minutes')),
-                              DropdownMenuItem(value: 30, child: Text('30 minutes')),
+                              DropdownMenuItem(
+                                value: 5,
+                                child: Text('5 minutes'),
+                              ),
+                              DropdownMenuItem(
+                                value: 10,
+                                child: Text('10 minutes'),
+                              ),
+                              DropdownMenuItem(
+                                value: 15,
+                                child: Text('15 minutes'),
+                              ),
+                              DropdownMenuItem(
+                                value: 30,
+                                child: Text('30 minutes'),
+                              ),
                             ],
                             onChanged: (val) {
-                              if (val != null) controller.updateSnoozeMinutes(val);
+                              if (val != null) {
+                                controller.updateSnoozeMinutes(val);
+                              }
                             },
                           ),
                         ],
@@ -417,6 +477,172 @@ class _RoutineEditorPageState extends ConsumerState<RoutineEditorPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryHero extends StatelessWidget {
+  const _CategoryHero({
+    required this.category,
+    required this.color,
+    required this.isEdit,
+  });
+
+  final RoutineCategory category;
+  final Color color;
+  final bool isEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AnimatedContainer(
+      duration: AppTokens.durationMedium,
+      height: 164,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withValues(alpha: isDark ? 0.52 : 0.72),
+            isDark ? AppColors.darkSurface : AppColors.lightSurfaceWarm,
+          ],
+        ),
+        borderRadius: AppTokens.borderRadiusXl,
+        boxShadow: AppTokens.softShadow(color: color),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -10,
+            top: -16,
+            bottom: -16,
+            width: 170,
+            child: AnimatedSwitcher(
+              duration: AppTokens.durationMedium,
+              child: Image.asset(
+                category.assetPath,
+                key: ValueKey(category),
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.all(AppTokens.s24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    isEdit ? 'Update your routine' : 'Create your routine',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.headlineSmall?.copyWith(color: Colors.white),
+                  ),
+                  const SizedBox(height: AppTokens.s8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: AppTokens.borderRadiusPill,
+                    ),
+                    child: Text(
+                      category.displayName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryCard extends StatelessWidget {
+  const _CategoryCard({
+    required this.category,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final RoutineCategory category;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final color = AppColors.getColorByKey(category.suggestedColor);
+    final surface = isDark ? AppColors.darkSurface : AppColors.lightSurface;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: category.displayName,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: AppTokens.borderRadiusLg,
+          child: AnimatedContainer(
+            duration: AppTokens.durationFast,
+            padding: const EdgeInsets.all(AppTokens.s12),
+            decoration: BoxDecoration(
+              color: selected ? color.withValues(alpha: 0.16) : surface,
+              borderRadius: AppTokens.borderRadiusLg,
+              border: Border.all(
+                color: selected
+                    ? color
+                    : theme.colorScheme.outline.withValues(alpha: 0.45),
+                width: selected ? 2 : 1,
+              ),
+              boxShadow: selected ? AppTokens.softShadow(color: color) : null,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Image.asset(category.assetPath, fit: BoxFit.contain),
+                ),
+                const SizedBox(width: AppTokens.s8),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          category.displayName,
+                          maxLines: 1,
+                          style: theme.textTheme.labelLarge,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Icon(
+                        selected ? Icons.check_circle_rounded : category.icon,
+                        color: selected ? color : theme.colorScheme.outline,
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../core/extensions/date_time_extensions.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_tokens.dart';
@@ -21,39 +22,23 @@ class TimelineReminderRow extends StatelessWidget {
     required this.onTap,
   });
 
-  Color _getStatusColor(OccurrenceStatus status) {
-    switch (status) {
-      case OccurrenceStatus.upcoming:
-        return AppColors.statusUpcoming;
-      case OccurrenceStatus.due:
-        return AppColors.statusDue;
-      case OccurrenceStatus.done:
-        return AppColors.statusDone;
-      case OccurrenceStatus.snoozed:
-        return AppColors.statusSnoozed;
-      case OccurrenceStatus.skipped:
-        return AppColors.statusSkipped;
-      case OccurrenceStatus.missed:
-        return AppColors.statusMissed;
-    }
-  }
+  Color _statusColor(OccurrenceStatus status) => switch (status) {
+    OccurrenceStatus.upcoming => AppColors.statusUpcoming,
+    OccurrenceStatus.due => AppColors.statusDue,
+    OccurrenceStatus.done => AppColors.statusDone,
+    OccurrenceStatus.snoozed => AppColors.statusSnoozed,
+    OccurrenceStatus.skipped => AppColors.statusSkipped,
+    OccurrenceStatus.missed => AppColors.statusMissed,
+  };
 
-  String _getStatusLabel(OccurrenceStatus status) {
-    switch (status) {
-      case OccurrenceStatus.upcoming:
-        return 'Upcoming';
-      case OccurrenceStatus.due:
-        return 'Due';
-      case OccurrenceStatus.done:
-        return 'Done';
-      case OccurrenceStatus.snoozed:
-        return 'Snoozed';
-      case OccurrenceStatus.skipped:
-        return 'Skipped';
-      case OccurrenceStatus.missed:
-        return 'Missed';
-    }
-  }
+  String _statusLabel(OccurrenceStatus status) => switch (status) {
+    OccurrenceStatus.upcoming => 'Upcoming',
+    OccurrenceStatus.due => 'Due now',
+    OccurrenceStatus.done => 'Done',
+    OccurrenceStatus.snoozed => 'Snoozed',
+    OccurrenceStatus.skipped => 'Skipped',
+    OccurrenceStatus.missed => 'Missed',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -61,76 +46,42 @@ class TimelineReminderRow extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final routine = occurrence.routine;
     final routineColor = AppColors.getColorByKey(routine.colorKey);
-    final statusColor = _getStatusColor(occurrence.status);
-    final isDone = occurrence.status == OccurrenceStatus.done;
-    final isSkipped = occurrence.status == OccurrenceStatus.skipped;
+    final statusColor = _statusColor(occurrence.status);
+    final finished =
+        occurrence.status == OccurrenceStatus.done ||
+        occurrence.status == OccurrenceStatus.skipped;
+    final secondary = isDark
+        ? AppColors.darkTextSecondary
+        : AppColors.lightTextSecondary;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppTokens.s12),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        borderRadius: AppTokens.borderRadiusLg,
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          width: 1,
-        ),
-        boxShadow: AppTokens.softShadow(),
-      ),
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: AppTokens.borderRadiusLg,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppTokens.s16, vertical: AppTokens.s14),
+        child: Container(
+          padding: const EdgeInsets.all(AppTokens.s14),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+            borderRadius: AppTokens.borderRadiusLg,
+            boxShadow: AppTokens.softShadow(),
+          ),
           child: Row(
             children: [
-              // Time and vertical indicator
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    occurrence.scheduledDateTime.toFormattedTime(),
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: isDone || isSkipped
-                          ? (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary)
-                          : null,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      _getStatusLabel(occurrence.status),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: statusColor,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: AppTokens.s16),
-              // Category Icon
               Container(
-                width: 44,
-                height: 44,
+                width: 60,
+                height: 60,
+                padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color: routineColor.withValues(alpha: 0.15),
+                  color: routineColor.withValues(alpha: 0.13),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  routine.category.icon,
-                  size: 22,
-                  color: routineColor,
+                child: Image.asset(
+                  routine.category.assetPath,
+                  fit: BoxFit.contain,
                 ),
               ),
-              const SizedBox(width: AppTokens.s12),
-              // Details
+              const SizedBox(width: AppTokens.s14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -140,18 +91,18 @@ class TimelineReminderRow extends StatelessWidget {
                         Flexible(
                           child: Text(
                             routine.name,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              decoration: isDone || isSkipped ? TextDecoration.lineThrough : null,
-                              color: isDone || isSkipped
-                                  ? (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary)
-                                  : null,
-                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              decoration: finished
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color: finished ? secondary : null,
+                            ),
                           ),
                         ),
-                        if (routine.soundMode == ReminderSoundMode.recorded) ...[
+                        if (routine.soundMode ==
+                            ReminderSoundMode.recorded) ...[
                           const SizedBox(width: 6),
                           Icon(
                             Icons.mic_rounded,
@@ -161,67 +112,82 @@ class TimelineReminderRow extends StatelessWidget {
                         ],
                       ],
                     ),
-                    if (routine.dosageText != null || routine.instructions != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        [
-                          if (routine.dosageText != null) routine.dosageText,
-                          if (routine.instructions != null) routine.instructions,
-                        ].join(' • '),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                    const SizedBox(height: 3),
+                    Text(
+                      [
+                        occurrence.scheduledDateTime.toFormattedTime(),
+                        if (routine.dosageText?.isNotEmpty == true)
+                          routine.dosageText!,
+                      ].join('  ·  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
                       ),
-                    ],
+                    ),
+                    const SizedBox(height: 7),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.13),
+                        borderRadius: AppTokens.borderRadiusPill,
+                      ),
+                      child: Text(
+                        _statusLabel(occurrence.status),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              // Quick action
-              if (!isDone && !isSkipped) ...[
+              if (!finished)
                 IconButton(
-                  icon: const Icon(Icons.check_circle_outline_rounded),
-                  color: AppColors.statusDone,
-                  tooltip: 'Mark Done',
                   onPressed: onDone,
+                  tooltip: 'Mark Done',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.ink,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: AppTokens.borderRadiusSm,
+                    ),
+                  ),
+                  icon: const Icon(Icons.check_rounded, size: 20),
+                )
+              else
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.13),
+                    borderRadius: AppTokens.borderRadiusSm,
+                  ),
+                  child: Icon(
+                    occurrence.status == OccurrenceStatus.done
+                        ? Icons.check_rounded
+                        : Icons.close_rounded,
+                    color: statusColor,
+                  ),
                 ),
+              if (!finished)
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert_rounded, size: 20),
-                  onSelected: (val) {
-                    if (val == 'snooze') onSnooze();
-                    if (val == 'skip') onSkip();
+                  tooltip: 'Reminder options',
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onSelected: (value) {
+                    if (value == 'snooze') onSnooze();
+                    if (value == 'skip') onSkip();
                   },
-                  itemBuilder: (ctx) => [
-                    const PopupMenuItem(
-                      value: 'snooze',
-                      child: Row(
-                        children: [
-                          Icon(Icons.snooze_rounded, size: 18),
-                          SizedBox(width: 8),
-                          Text('Snooze'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'skip',
-                      child: Row(
-                        children: [
-                          Icon(Icons.close_rounded, size: 18),
-                          SizedBox(width: 8),
-                          Text('Skip'),
-                        ],
-                      ),
-                    ),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'snooze', child: Text('Snooze')),
+                    PopupMenuItem(value: 'skip', child: Text('Skip this time')),
                   ],
                 ),
-              ] else ...[
-                Icon(
-                  isDone ? Icons.check_circle_rounded : Icons.cancel_outlined,
-                  color: isDone ? AppColors.statusDone : AppColors.statusSkipped,
-                  size: 24,
-                ),
-              ],
             ],
           ),
         ),

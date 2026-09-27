@@ -4,7 +4,13 @@ enum RoutineCategory {
   pill('pill', 'Pill', 'Take', Icons.medication_outlined, 'blue'),
   medicine('medicine', 'Medicine', 'Take', Icons.healing_outlined, 'rose'),
   vitamin('vitamin', 'Vitamin', 'Take', Icons.local_florist_outlined, 'amber'),
-  supplement('supplement', 'Supplement', 'Take', Icons.fitness_center_outlined, 'teal'),
+  supplement(
+    'supplement',
+    'Supplement',
+    'Take',
+    Icons.fitness_center_outlined,
+    'teal',
+  ),
   cream('cream', 'Cream', 'Apply', Icons.spa_outlined, 'lavender'),
   skincare('skincare', 'Skincare', 'Apply', Icons.water_drop_outlined, 'mint'),
   drops('drops', 'Drops', 'Use', Icons.opacity_outlined, 'indigo'),
@@ -24,10 +30,22 @@ enum RoutineCategory {
     this.suggestedColor,
   );
 
+  String get assetPath => switch (this) {
+    RoutineCategory.pill => 'assets/generated/category_pill.png',
+    RoutineCategory.medicine => 'assets/generated/category_medicine.png',
+    RoutineCategory.vitamin => 'assets/generated/category_vitamin.png',
+    RoutineCategory.supplement => 'assets/generated/category_supplement.png',
+    RoutineCategory.cream => 'assets/generated/category_cream.png',
+    RoutineCategory.skincare => 'assets/generated/category_skincare.png',
+    RoutineCategory.drops => 'assets/generated/category_drops.png',
+    RoutineCategory.custom => 'assets/generated/category_custom.png',
+  };
+
   static RoutineCategory fromString(String? value) {
     if (value == null) return RoutineCategory.custom;
     for (final category in RoutineCategory.values) {
-      if (category.id == value.toLowerCase() || category.name == value.toLowerCase()) {
+      if (category.id == value.toLowerCase() ||
+          category.name == value.toLowerCase()) {
         return category;
       }
     }
