@@ -12,7 +12,10 @@ class RoutineFilterNotifier extends Notifier<RoutineFilter> {
   void setFilter(RoutineFilter filter) => state = filter;
 }
 
-final routineFilterProvider = NotifierProvider<RoutineFilterNotifier, RoutineFilter>(RoutineFilterNotifier.new);
+final routineFilterProvider =
+    NotifierProvider<RoutineFilterNotifier, RoutineFilter>(
+      RoutineFilterNotifier.new,
+    );
 
 class RoutinesController extends Notifier<AsyncValue<void>> {
   @override
@@ -47,8 +50,8 @@ class RoutinesController extends Notifier<AsyncValue<void>> {
       final routineRepo = ref.read(routineRepositoryProvider);
       final scheduler = ref.read(reminderSchedulerProvider);
 
-      await scheduler.cancelRoutine(routine);
       await routineRepo.setArchived(routine.id, true);
+      await scheduler.cancelRoutine(routine);
 
       ref.invalidate(todayOccurrencesProvider);
       state = const AsyncValue.data(null);
@@ -81,7 +84,8 @@ class RoutinesController extends Notifier<AsyncValue<void>> {
       final scheduler = ref.read(reminderSchedulerProvider);
       final audioStorage = ref.read(audioStorageServiceProvider);
 
-      // 1. Cancel pending OS notifications
+      // Hide from reconciliation before cancellation and audio cleanup.
+      await routineRepo.setActive(routine.id, false);
       await scheduler.cancelRoutine(routine);
 
       // 2. Delete local audio recording if exists
@@ -103,4 +107,7 @@ class RoutinesController extends Notifier<AsyncValue<void>> {
   }
 }
 
-final routinesControllerProvider = NotifierProvider<RoutinesController, AsyncValue<void>>(RoutinesController.new);
+final routinesControllerProvider =
+    NotifierProvider<RoutinesController, AsyncValue<void>>(
+      RoutinesController.new,
+    );

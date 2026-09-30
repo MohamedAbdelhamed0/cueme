@@ -1,24 +1,45 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+// The native weekly path preserves future starts; regression-tested against the
+// installed plugin's channel contract.
+// ignore: implementation_imports
+import 'package:flutter_local_notifications/src/platform_specifics/android/method_channel_mappers.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/app_logger.dart';
 import '../../domain/entities/routine.dart';
+import '../../domain/repositories/routine_repository.dart';
+import '../../domain/services/reminder_schedule_calculator.dart';
 import '../../domain/enums/reminder_enums.dart';
 import 'reminder_scheduler.dart';
 
 class FlutterLocalNotificationScheduler implements ReminderScheduler {
   final FlutterLocalNotificationsPlugin _notificationsPlugin;
   void Function(String payload)? _onNotificationTapped;
+  final RoutineRepository? _routineRepository;
+  Future<void> _tail = Future<void>.value();
+
+  Future<T> _enqueue<T>(Future<T> Function() operation) {
+    final result = _tail.then((_) => operation());
+    // A failed operation must not prevent subsequent repairs.
+    _tail = result.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stack) {},
+    );
+    return result;
+  }
 
   FlutterLocalNotificationScheduler({
     FlutterLocalNotificationsPlugin? notificationsPlugin,
-  }) : _notificationsPlugin =
+    RoutineRepository? routineRepository,
+    // ignore: prefer_initializing_formals
+  }) : _routineRepository = routineRepository,
+       _notificationsPlugin =
            notificationsPlugin ?? FlutterLocalNotificationsPlugin();
 
   @override
@@ -66,14 +87,14 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
 
   @override
   Future<bool> requestNotificationPermission() async {
-    if (Platform.isAndroid) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
       final androidImpl = _notificationsPlugin
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
           >();
       final granted = await androidImpl?.requestNotificationsPermission();
       return granted ?? false;
-    } else if (Platform.isIOS) {
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       final iosImpl = _notificationsPlugin
           .resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin
@@ -90,7 +111,7 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
 
   @override
   Future<ExactAlarmCapability> getExactAlarmCapability() async {
-    if (Platform.isAndroid) {
+    if (defaultTargetPlatform == TargetPlatform.android) {
       final androidImpl = _notificationsPlugin
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
@@ -105,21 +126,78 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
   }
 
   @override
-  Future<void> scheduleRoutine(Routine routine) async {
+  Future<ScheduleVerification> scheduleRoutine(Routine routine) =>
+      _enqueue(() async {
+        final latest = _routineRepository == null
+            ? routine
+            : await _routineRepository.getById(routine.id);
+        if (latest == null) {
+          await _cancelRoutine(routine);
+          return const ScheduleVerification({}, {});
+        }
+        return _scheduleRoutine(latest);
+      });
+
+  Future<ScheduleVerification> _scheduleRoutine(Routine routine) async {
+    final expectedIds = <int>{};
     if (!routine.isActive || routine.isArchived) {
-      await cancelRoutine(routine);
-      return;
+      await _cancelRoutine(routine);
+      return const ScheduleVerification({}, {});
     }
 
     await _refreshTimezone();
-    final notificationDetails = await _buildNotificationDetails(routine);
-    // Cancel existing before rescheduling to avoid duplicates
-    await cancelRoutine(routine);
-
+    final now = tz.TZDateTime.now(tz.local);
+    final dates = <int, tz.TZDateTime>{};
+    for (final time in routine.reminderTimes.where((time) => time.isEnabled)) {
+      for (final day in routine.selectedWeekdays) {
+        final next = ReminderScheduleCalculator.nextForWeekday(
+          now: now,
+          startDate: routine.startDate,
+          endDate: routine.endDate,
+          weekday: day,
+          hour: time.hour,
+          minute: time.minute,
+        );
+        if (next != null) {
+          dates[time.notificationId * 10 + day] = tz.TZDateTime.from(
+            next,
+            tz.local,
+          );
+        }
+      }
+    }
+    expectedIds.addAll(dates.keys);
     final exactCapability = await getExactAlarmCapability();
-    final scheduleMode = (exactCapability == ExactAlarmCapability.available)
+    final scheduleMode = exactCapability == ExactAlarmCapability.available
         ? AndroidScheduleMode.exactAllowWhileIdle
         : AndroidScheduleMode.inexactAllowWhileIdle;
+    final existing = await _notificationsPlugin.pendingNotificationRequests();
+    final own = existing
+        .where(
+          (request) => _payload(request.payload)?['routineId'] == routine.id,
+        )
+        .toList();
+    final current = own
+        .where((request) {
+          final payload = _payload(request.payload);
+          return payload?['scheduleRevision'] ==
+                  routine.updatedAt.toIso8601String() &&
+              payload?['scheduleTimezone'] == tz.local.name &&
+              payload?['scheduleMode'] == scheduleMode.name;
+        })
+        .map((request) => request.id)
+        .toSet();
+    // Never cancel a valid alarm on resume. Android may still be delivering a
+    // due alarm; replacing it with next week's occurrence loses that reminder.
+    if (current.containsAll(expectedIds) &&
+        own.every((request) => expectedIds.contains(request.id))) {
+      return ScheduleVerification(expectedIds, current);
+    }
+    final notificationDetails = await _buildNotificationDetails(routine);
+    for (final request in own) {
+      await _cancelByNotificationId(request.id);
+    }
+    await _cancelRoutine(routine);
 
     for (final reminderTime in routine.reminderTimes) {
       if (!reminderTime.isEnabled) continue;
@@ -131,16 +209,8 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         // Base notificationId multiplied by 10 plus weekday
         final id = (reminderTime.notificationId * 10) + weekday;
 
-        final nextDate = _nextInstanceOfWeekdayAndTime(
-          weekday,
-          reminderTime.hour,
-          reminderTime.minute,
-        );
-
-        // Check date bounds
-        if (routine.endDate != null && nextDate.isAfter(routine.endDate!)) {
-          continue;
-        }
+        final nextDate = dates[id];
+        if (nextDate == null) continue;
 
         final title = routine.name;
         final bodyParts = <String>[];
@@ -160,19 +230,45 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
           'routineId': routine.id,
           'reminderTimeId': reminderTime.id,
           'scheduledFor': nextDate.toIso8601String(),
+          'scheduleRevision': routine.updatedAt.toIso8601String(),
+          'scheduleTimezone': tz.local.name,
+          'scheduleMode': scheduleMode.name,
         });
 
         try {
-          await _notificationsPlugin.zonedSchedule(
-            id: id,
-            title: title,
-            body: body,
-            scheduledDate: nextDate,
-            notificationDetails: notificationDetails,
-            androidScheduleMode: scheduleMode,
-            matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-            payload: payload,
-          );
+          // Android's matching-components API discards a future start date.
+          // Its native weekly-repeat path retains the explicit first date.
+          if (defaultTargetPlatform == TargetPlatform.android &&
+              ReminderScheduleCalculator.dateOnly(routine.startDate).isAfter(
+                ReminderScheduleCalculator.dateOnly(
+                  tz.TZDateTime.now(tz.local),
+                ),
+              )) {
+            await const MethodChannel(
+              'dexterous.com/flutter/local_notifications',
+            ).invokeMethod<void>('zonedSchedule', {
+              'id': id, 'title': title, 'body': body, 'payload': payload,
+              'timeZoneName': tz.local.name,
+              'scheduledDateTime':
+                  '${nextDate.year.toString().padLeft(4, '0')}-${nextDate.month.toString().padLeft(2, '0')}-${nextDate.day.toString().padLeft(2, '0')}T${nextDate.hour.toString().padLeft(2, '0')}:${nextDate.minute.toString().padLeft(2, '0')}:00',
+              'scheduledNotificationRepeatFrequency': 1, // native Weekly
+              'platformSpecifics': {
+                ...notificationDetails.android!.toMap(),
+                'scheduleMode': scheduleMode.name,
+              },
+            });
+          } else {
+            await _notificationsPlugin.zonedSchedule(
+              id: id,
+              title: title,
+              body: body,
+              scheduledDate: nextDate,
+              notificationDetails: notificationDetails,
+              androidScheduleMode: scheduleMode,
+              matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+              payload: payload,
+            );
+          }
           AppLogger.debug(
             'NotificationScheduler',
             'Scheduled notification id=$id at $nextDate',
@@ -187,20 +283,35 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         }
       }
     }
+    final pending = await _notificationsPlugin.pendingNotificationRequests();
+    final verification = ScheduleVerification(
+      expectedIds,
+      pending.map((request) => request.id).toSet(),
+    );
+    if (!verification.isComplete) {
+      throw StateError('Missing reminder alarms: ${verification.missingIds}');
+    }
+    return verification;
   }
 
   @override
-  Future<void> cancelRoutine(Routine routine) async {
+  Future<void> cancelRoutine(Routine routine) =>
+      _enqueue(() => _cancelRoutine(routine));
+
+  Future<void> _cancelRoutine(Routine routine) async {
     for (final reminderTime in routine.reminderTimes) {
       for (int weekday = 1; weekday <= 7; weekday++) {
         final id = (reminderTime.notificationId * 10) + weekday;
-        await cancelByNotificationId(id);
+        await _cancelByNotificationId(id);
       }
     }
   }
 
   @override
-  Future<void> cancelByNotificationId(int notificationId) async {
+  Future<void> cancelByNotificationId(int notificationId) =>
+      _enqueue(() => _cancelByNotificationId(notificationId));
+
+  Future<void> _cancelByNotificationId(int notificationId) async {
     try {
       await _notificationsPlugin.cancel(id: notificationId);
       AppLogger.debug(
@@ -213,23 +324,56 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
         'Error cancelling notification $notificationId',
         e,
       );
+      rethrow;
     }
   }
 
   @override
-  Future<void> rescheduleAll(List<Routine> activeRoutines) async {
-    AppLogger.info(
-      'NotificationScheduler',
-      'Rescheduling all active routines (${activeRoutines.length})',
-    );
-    await _notificationsPlugin.cancelAll();
-    for (final routine in activeRoutines) {
-      await scheduleRoutine(routine);
+  Future<void> rescheduleAll(
+    List<Routine> activeRoutines,
+  ) => _enqueue(() async {
+    // Reload inside the queue, after pending saves/cancellations have finished.
+    final latest = _routineRepository == null
+        ? activeRoutines
+        : await _routineRepository.getAllActive();
+    final activeIds = latest.map((routine) => routine.id).toSet();
+    for (final request
+        in await _notificationsPlugin.pendingNotificationRequests()) {
+      final payload = _payload(request.payload);
+      if (payload?['type'] == 'routineReminder' &&
+          !activeIds.contains(payload?['routineId'])) {
+        await _cancelByNotificationId(request.id);
+      }
+    }
+    Object? firstError;
+    for (final routine in latest) {
+      try {
+        await _scheduleRoutine(routine);
+      } catch (error, stack) {
+        firstError ??= error;
+        AppLogger.error(
+          'NotificationScheduler',
+          'Failed rebuilding routine ${routine.id}',
+          error,
+          stack,
+        );
+      }
+    }
+    if (firstError != null) throw firstError;
+  });
+
+  Map<String, dynamic>? _payload(String? value) {
+    try {
+      return value == null ? null : jsonDecode(value) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
     }
   }
 
   @override
-  Future<void> testNotification() async {
+  Future<void> testNotification() => _enqueue(_testNotification);
+
+  Future<void> _testNotification() async {
     await _refreshTimezone();
     final exactCapability = await getExactAlarmCapability();
     const androidDetails = AndroidNotificationDetails(
@@ -275,7 +419,7 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
 
   Future<NotificationDetails> _buildNotificationDetails(Routine routine) async {
     String? androidSoundUri;
-    if (Platform.isAndroid &&
+    if (defaultTargetPlatform == TargetPlatform.android &&
         routine.soundMode == ReminderSoundMode.recorded &&
         routine.audioRecording != null) {
       androidSoundUri = await const MethodChannel('cueme/notification_sounds')
@@ -372,36 +516,5 @@ class FlutterLocalNotificationScheduler implements ReminderScheduler {
     }
 
     return NotificationDetails(android: androidDetails, iOS: iosDetails);
-  }
-
-  tz.TZDateTime _nextInstanceOfWeekdayAndTime(
-    int targetWeekday,
-    int hour,
-    int minute,
-  ) {
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduledDate = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
-    );
-
-    // Calculate days until target weekday (1=Mon ... 7=Sun)
-    var daysUntilWeekday = (targetWeekday - scheduledDate.weekday) % 7;
-    if (daysUntilWeekday < 0) {
-      daysUntilWeekday += 7;
-    }
-
-    scheduledDate = scheduledDate.add(Duration(days: daysUntilWeekday));
-
-    // If it's today and the time has already passed, schedule for next week
-    if (daysUntilWeekday == 0 && scheduledDate.isBefore(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 7));
-    }
-
-    return scheduledDate;
   }
 }

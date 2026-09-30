@@ -9,6 +9,7 @@ import '../../domain/entities/reminder_time.dart';
 import '../../domain/entities/routine.dart';
 import '../../domain/enums/reminder_enums.dart';
 import '../../domain/enums/routine_category.dart';
+import '../../domain/services/reminder_schedule_calculator.dart';
 
 class RoutineDraft {
   final String? existingId;
@@ -56,7 +57,9 @@ class RoutineDraft {
   });
 
   factory RoutineDraft.initial() {
-    return RoutineDraft(startDate: DateTime.now());
+    return RoutineDraft(
+      startDate: ReminderScheduleCalculator.dateOnly(DateTime.now()),
+    );
   }
 
   factory RoutineDraft.fromRoutine(Routine routine) {
@@ -71,9 +74,14 @@ class RoutineDraft {
       startDate: routine.startDate,
       endDate: routine.endDate,
       weekdays: routine.selectedWeekdays,
-      times: routine.reminderTimes
-          .map((t) => TimeOfDay(hour: t.hour, minute: t.minute))
-          .toList(),
+      times:
+          (routine.reminderTimes
+              .map((t) => TimeOfDay(hour: t.hour, minute: t.minute))
+              .toList()
+            ..sort(
+              (a, b) =>
+                  (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
+            )),
       soundMode: routine.soundMode,
       audioId: routine.audioId,
       existingAudioPath: routine.audioRecording?.localPath,
@@ -101,6 +109,7 @@ class RoutineDraft {
     ReminderSoundMode? soundMode,
     String? audioId,
     String? audioTempPath,
+    bool clearAudioTempPath = false,
     String? existingAudioPath,
     int? audioDurationMs,
     int? audioRevision,
@@ -122,7 +131,9 @@ class RoutineDraft {
       times: times ?? this.times,
       soundMode: soundMode ?? this.soundMode,
       audioId: audioId ?? this.audioId,
-      audioTempPath: audioTempPath ?? this.audioTempPath,
+      audioTempPath: clearAudioTempPath
+          ? null
+          : (audioTempPath ?? this.audioTempPath),
       existingAudioPath: existingAudioPath ?? this.existingAudioPath,
       audioDurationMs: audioDurationMs ?? this.audioDurationMs,
       audioRevision: audioRevision ?? this.audioRevision,
@@ -156,7 +167,10 @@ class RoutineDraft {
       distinctTimes.add(key);
     }
 
-    if (endDate != null && endDate!.isBefore(startDate)) {
+    if (endDate != null &&
+        ReminderScheduleCalculator.dateOnly(
+          endDate!,
+        ).isBefore(ReminderScheduleCalculator.dateOnly(startDate))) {
       return 'End date cannot be earlier than start date';
     }
 
@@ -183,15 +197,12 @@ class SaveRoutineResult {
   final String? warning;
   final Routine? routine;
 
-  SaveRoutineResult({
-    required this.success,
-    this.warning,
-    this.routine,
-  });
+  SaveRoutineResult({required this.success, this.warning, this.routine});
 }
 
 class RoutineEditorController extends Notifier<RoutineDraft> {
   final Routine? initialRoutine;
+  Future<SaveRoutineResult>? _saving;
 
   RoutineEditorController([this.initialRoutine]);
 
@@ -213,11 +224,16 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
     );
   }
 
-  void updateDosage(String dosage) => state = state.copyWith(dosageText: dosage);
-  void updateInstructions(String instructions) => state = state.copyWith(instructions: instructions);
-  void updateColorKey(String colorKey) => state = state.copyWith(colorKey: colorKey);
-  void updateStartDate(DateTime date) => state = state.copyWith(startDate: date);
-  void updateEndDate(DateTime? date) => state = state.copyWith(endDate: date, clearEndDate: date == null);
+  void updateDosage(String dosage) =>
+      state = state.copyWith(dosageText: dosage);
+  void updateInstructions(String instructions) =>
+      state = state.copyWith(instructions: instructions);
+  void updateColorKey(String colorKey) =>
+      state = state.copyWith(colorKey: colorKey);
+  void updateStartDate(DateTime date) =>
+      state = state.copyWith(startDate: date);
+  void updateEndDate(DateTime? date) =>
+      state = state.copyWith(endDate: date, clearEndDate: date == null);
 
   void toggleWeekday(int weekday) {
     final updated = Set<int>.from(state.weekdays);
@@ -231,17 +247,33 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
     state = state.copyWith(weekdays: updated);
   }
 
-  void addTime(TimeOfDay time) {
+  void setWeekdays(Set<int> days) => state = state.copyWith(weekdays: days);
+
+  String? addTime(TimeOfDay time) {
+    if (state.times.contains(time)) {
+      return 'This reminder time is already added';
+    }
     final updated = List<TimeOfDay>.from(state.times)..add(time);
-    updated.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+    updated.sort(
+      (a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
+    );
     state = state.copyWith(times: updated);
+    return null;
   }
 
-  void updateTimeAt(int index, TimeOfDay newTime) {
+  String? updateTimeAt(int index, TimeOfDay newTime) {
+    if (state.times.asMap().entries.any(
+      (entry) => entry.key != index && entry.value == newTime,
+    )) {
+      return 'This reminder time is already added';
+    }
     final updated = List<TimeOfDay>.from(state.times);
     updated[index] = newTime;
-    updated.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+    updated.sort(
+      (a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute),
+    );
     state = state.copyWith(times: updated);
+    return null;
   }
 
   void removeTimeAt(int index) {
@@ -250,7 +282,8 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
     state = state.copyWith(times: updated);
   }
 
-  void setSoundMode(ReminderSoundMode mode) => state = state.copyWith(soundMode: mode);
+  void setSoundMode(ReminderSoundMode mode) =>
+      state = state.copyWith(soundMode: mode);
 
   void attachRecordedVoice({
     required String tempPath,
@@ -274,12 +307,24 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
     );
   }
 
-  void updateVibration(bool enabled) => state = state.copyWith(vibrationEnabled: enabled);
-  void updateSnoozeEnabled(bool enabled) => state = state.copyWith(snoozeEnabled: enabled);
-  void updateSnoozeMinutes(int minutes) => state = state.copyWith(snoozeMinutes: minutes);
+  void updateVibration(bool enabled) =>
+      state = state.copyWith(vibrationEnabled: enabled);
+  void updateSnoozeEnabled(bool enabled) =>
+      state = state.copyWith(snoozeEnabled: enabled);
+  void updateSnoozeMinutes(int minutes) =>
+      state = state.copyWith(snoozeMinutes: minutes);
 
-  Future<SaveRoutineResult> saveRoutine() async {
-    final validationError = state.validate();
+  Future<SaveRoutineResult> saveRoutine() {
+    if (_saving != null) return _saving!;
+    final keepAlive = ref.keepAlive();
+    return _saving = _saveRoutine(state).whenComplete(() {
+      _saving = null;
+      keepAlive.close();
+    });
+  }
+
+  Future<SaveRoutineResult> _saveRoutine(RoutineDraft draft) async {
+    final validationError = draft.validate();
     if (validationError != null) {
       return SaveRoutineResult(success: false, warning: validationError);
     }
@@ -290,46 +335,49 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
       final audioStorage = ref.read(audioStorageServiceProvider);
       final scheduler = ref.read(reminderSchedulerProvider);
 
-      final routineId = state.existingId ?? const Uuid().v4();
+      final routineId = draft.existingId ?? const Uuid().v4();
       final now = DateTime.now();
+      final previousRoutine = draft.existingId == null
+          ? null
+          : await routineRepo.getById(routineId);
 
       AudioRecording? finalAudio;
 
       // Handle recorded audio persistence
-      if (state.soundMode == ReminderSoundMode.recorded) {
-        if (state.audioTempPath != null) {
-          final audioId = state.audioId ?? const Uuid().v4();
+      if (draft.soundMode == ReminderSoundMode.recorded) {
+        if (draft.audioTempPath != null) {
+          final audioId = draft.audioId ?? const Uuid().v4();
           final savedPath = await audioStorage.saveRecording(
-            tempPath: state.audioTempPath!,
+            tempPath: draft.audioTempPath!,
             audioId: audioId,
             routineId: routineId,
-            revision: state.audioRevision,
+            revision: draft.audioRevision,
           );
 
           final iosFilename = audioStorage.getIosSoundFilename(
             routineId: routineId,
-            revision: state.audioRevision,
+            revision: draft.audioRevision,
           );
 
           finalAudio = AudioRecording(
             id: audioId,
             localPath: savedPath,
             iosSoundFilename: iosFilename,
-            durationMs: state.audioDurationMs ?? 5000,
-            revision: state.audioRevision,
+            durationMs: draft.audioDurationMs ?? 5000,
+            revision: draft.audioRevision,
             createdAt: now,
             updatedAt: now,
           );
-        } else if (state.existingAudioPath != null && state.audioId != null) {
+        } else if (draft.existingAudioPath != null && draft.audioId != null) {
           finalAudio = AudioRecording(
-            id: state.audioId!,
-            localPath: state.existingAudioPath!,
+            id: draft.audioId!,
+            localPath: draft.existingAudioPath!,
             iosSoundFilename: audioStorage.getIosSoundFilename(
               routineId: routineId,
-              revision: state.audioRevision,
+              revision: draft.audioRevision,
             ),
-            durationMs: state.audioDurationMs ?? 5000,
-            revision: state.audioRevision,
+            durationMs: draft.audioDurationMs ?? 5000,
+            revision: draft.audioRevision,
             createdAt: now,
             updatedAt: now,
           );
@@ -338,8 +386,8 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
 
       // Generate reminder times
       final reminderTimes = <ReminderTime>[];
-      for (int i = 0; i < state.times.length; i++) {
-        final t = state.times[i];
+      for (int i = 0; i < draft.times.length; i++) {
+        final t = draft.times[i];
         final notifId = await idService.allocateNotificationId();
         reminderTimes.add(
           ReminderTime(
@@ -358,34 +406,44 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
 
       final routine = Routine(
         id: routineId,
-        name: state.name.trim(),
-        category: state.category,
-        actionVerb: state.category.defaultVerb,
-        dosageText: state.dosageText?.trim().isNotEmpty == true ? state.dosageText!.trim() : null,
-        instructions: state.instructions?.trim().isNotEmpty == true ? state.instructions!.trim() : null,
-        iconKey: state.iconKey,
-        colorKey: state.colorKey,
-        isActive: true,
-        isArchived: false,
-        startDate: state.startDate,
-        endDate: state.endDate,
-        weekdaysMask: Routine.maskFromWeekdays(state.weekdays),
-        soundMode: state.soundMode,
+        name: draft.name.trim(),
+        category: draft.category,
+        actionVerb: draft.category.defaultVerb,
+        dosageText: draft.dosageText?.trim().isNotEmpty == true
+            ? draft.dosageText!.trim()
+            : null,
+        instructions: draft.instructions?.trim().isNotEmpty == true
+            ? draft.instructions!.trim()
+            : null,
+        iconKey: draft.iconKey,
+        colorKey: draft.colorKey,
+        isActive: previousRoutine?.isActive ?? true,
+        isArchived: previousRoutine?.isArchived ?? false,
+        startDate: ReminderScheduleCalculator.dateOnly(draft.startDate),
+        endDate: draft.endDate == null
+            ? null
+            : ReminderScheduleCalculator.dateOnly(draft.endDate!),
+        weekdaysMask: Routine.maskFromWeekdays(draft.weekdays),
+        soundMode: draft.soundMode,
         audioId: finalAudio?.id,
-        vibrationEnabled: state.vibrationEnabled,
-        snoozeEnabled: state.snoozeEnabled,
-        snoozeMinutes: state.snoozeMinutes,
-        createdAt: now,
+        vibrationEnabled: draft.vibrationEnabled,
+        snoozeEnabled: draft.snoozeEnabled,
+        snoozeMinutes: draft.snoozeMinutes,
+        createdAt: previousRoutine?.createdAt ?? now,
         updatedAt: now,
         reminderTimes: reminderTimes,
         audioRecording: finalAudio,
       );
 
       // Save to database
-      final previousRoutine = state.existingId == null
-          ? null
-          : await routineRepo.getById(routineId);
       await routineRepo.saveRoutine(routine);
+      // Retain the saved identity if the editor stays open for reminder recovery.
+      state = draft.copyWith(
+        existingId: routineId,
+        clearAudioTempPath: true,
+        audioId: finalAudio?.id,
+        existingAudioPath: finalAudio?.localPath,
+      );
 
       // Re-schedule notifications
       String? schedulerWarning;
@@ -393,10 +451,18 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
         if (previousRoutine != null) {
           await scheduler.cancelRoutine(previousRoutine);
         }
-        await scheduler.scheduleRoutine(routine);
+        final allowed = await scheduler.requestNotificationPermission();
+        final verification = await scheduler.scheduleRoutine(routine);
+        if (!allowed || !verification.isComplete) {
+          schedulerWarning = 'Routine saved, reminders need attention';
+        } else if (await scheduler.getExactAlarmCapability() !=
+            ExactAlarmCapability.available) {
+          schedulerWarning =
+              'Routine saved, reminders need attention: enable precise alarms for on-time alerts';
+        }
       } catch (e) {
         AppLogger.warn('RoutineEditor', 'Scheduling failed after DB commit', e);
-        schedulerWarning = 'Routine saved, but notification scheduling encountered an issue: $e';
+        schedulerWarning = 'Routine saved, reminders need attention';
       }
 
       ref.invalidate(todayOccurrencesProvider);
@@ -407,12 +473,15 @@ class RoutineEditorController extends Notifier<RoutineDraft> {
       );
     } catch (e, st) {
       AppLogger.error('RoutineEditor', 'Failed to save routine', e, st);
-      return SaveRoutineResult(success: false, warning: 'Failed to save routine: $e');
+      return SaveRoutineResult(
+        success: false,
+        warning: 'Failed to save routine: $e',
+      );
     }
   }
 }
 
-final routineEditorControllerProvider =
-    NotifierProvider.family.autoDispose<RoutineEditorController, RoutineDraft, Routine?>(
-  (arg) => RoutineEditorController(arg),
-);
+final routineEditorControllerProvider = NotifierProvider.family
+    .autoDispose<RoutineEditorController, RoutineDraft, Routine?>(
+      (arg) => RoutineEditorController(arg),
+    );

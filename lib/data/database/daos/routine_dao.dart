@@ -18,7 +18,9 @@ class RoutineWithDetails {
   });
 }
 
-@DriftAccessor(tables: [RoutinesTable, ReminderTimesTable, AudioRecordingsTable])
+@DriftAccessor(
+  tables: [RoutinesTable, ReminderTimesTable, AudioRecordingsTable],
+)
 class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
   RoutineDao(super.db);
 
@@ -43,8 +45,9 @@ class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
   }
 
   Future<List<RoutineWithDetails>> getAllActiveRoutines() async {
-    final query = select(routinesTable)
-      ..where((tbl) => tbl.isActive.equals(true) & tbl.isArchived.equals(false));
+    final query = select(
+      routinesTable,
+    )..where((tbl) => tbl.isActive.equals(true) & tbl.isArchived.equals(false));
     final routineRows = await query.get();
     return _populateDetails(routineRows);
   }
@@ -56,7 +59,11 @@ class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
 
     final timesQuery = select(reminderTimesTable)
       ..where((tbl) => tbl.routineId.equals(id))
-      ..orderBy([(tbl) => OrderingTerm.asc(tbl.sortOrder), (tbl) => OrderingTerm.asc(tbl.hour), (tbl) => OrderingTerm.asc(tbl.minute)]);
+      ..orderBy([
+        (tbl) => OrderingTerm.asc(tbl.sortOrder),
+        (tbl) => OrderingTerm.asc(tbl.hour),
+        (tbl) => OrderingTerm.asc(tbl.minute),
+      ]);
     final times = await timesQuery.get();
 
     AudioRecordingRow? audio;
@@ -73,24 +80,32 @@ class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
     );
   }
 
-  Future<List<RoutineWithDetails>> _populateDetails(List<RoutineRow> routineRows) async {
+  Future<List<RoutineWithDetails>> _populateDetails(
+    List<RoutineRow> routineRows,
+  ) async {
     if (routineRows.isEmpty) return [];
 
     final routineIds = routineRows.map((r) => r.id).toList();
 
-    final allTimes = await (select(reminderTimesTable)
-          ..where((tbl) => tbl.routineId.isIn(routineIds))
-          ..orderBy([
-            (tbl) => OrderingTerm.asc(tbl.sortOrder),
-            (tbl) => OrderingTerm.asc(tbl.hour),
-            (tbl) => OrderingTerm.asc(tbl.minute),
-          ]))
-        .get();
+    final allTimes =
+        await (select(reminderTimesTable)
+              ..where((tbl) => tbl.routineId.isIn(routineIds))
+              ..orderBy([
+                (tbl) => OrderingTerm.asc(tbl.sortOrder),
+                (tbl) => OrderingTerm.asc(tbl.hour),
+                (tbl) => OrderingTerm.asc(tbl.minute),
+              ]))
+            .get();
 
-    final audioIds = routineRows.map((r) => r.audioId).whereType<String>().toList();
+    final audioIds = routineRows
+        .map((r) => r.audioId)
+        .whereType<String>()
+        .toList();
     final allAudio = audioIds.isEmpty
         ? <AudioRecordingRow>[]
-        : await (select(audioRecordingsTable)..where((tbl) => tbl.id.isIn(audioIds))).get();
+        : await (select(
+            audioRecordingsTable,
+          )..where((tbl) => tbl.id.isIn(audioIds))).get();
 
     final audioMap = {for (final a in allAudio) a.id: a};
     final timesMap = <String, List<ReminderTimeRow>>{};
@@ -102,7 +117,9 @@ class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
       return RoutineWithDetails(
         routine: routine,
         reminderTimes: timesMap[routine.id] ?? [],
-        audioRecording: routine.audioId != null ? audioMap[routine.audioId!] : null,
+        audioRecording: routine.audioId != null
+            ? audioMap[routine.audioId!]
+            : null,
       );
     }).toList();
   }
@@ -122,7 +139,9 @@ class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
       final routineId = routineCompanion.id.value;
 
       // Keep existing reminder times that are still present, replace or delete stale
-      await (delete(reminderTimesTable)..where((tbl) => tbl.routineId.equals(routineId))).go();
+      await (delete(
+        reminderTimesTable,
+      )..where((tbl) => tbl.routineId.equals(routineId))).go();
 
       for (final time in reminderTimeCompanions) {
         await into(reminderTimesTable).insert(time);
@@ -132,11 +151,19 @@ class RoutineDao extends DatabaseAccessor<AppDatabase> with _$RoutineDaoMixin {
 
   Future<void> deleteRoutine(String id) {
     return transaction(() async {
-      final routine = await (select(routinesTable)..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
+      final routine = await (select(
+        routinesTable,
+      )..where((tbl) => tbl.id.equals(id))).getSingleOrNull();
       if (routine?.audioId != null) {
-        await (delete(audioRecordingsTable)..where((tbl) => tbl.id.equals(routine!.audioId!))).go();
+        await (delete(
+          audioRecordingsTable,
+        )..where((tbl) => tbl.id.equals(routine!.audioId!))).go();
       }
-      // reminderTimes cascade deletes via foreign key
+      // SQLite connections may have foreign-key enforcement disabled. Remove
+      // child rows explicitly so deleted times cannot survive as orphan IDs.
+      await (delete(
+        reminderTimesTable,
+      )..where((tbl) => tbl.routineId.equals(id))).go();
       await (delete(routinesTable)..where((tbl) => tbl.id.equals(id))).go();
     });
   }

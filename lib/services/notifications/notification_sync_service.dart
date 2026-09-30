@@ -5,33 +5,25 @@ import 'reminder_scheduler.dart';
 class NotificationSyncService {
   final RoutineRepository _routineRepository;
   final ReminderScheduler _scheduler;
-  String? _lastKnownTimezone;
-
   NotificationSyncService(this._routineRepository, this._scheduler);
 
   Future<void> reconcile({bool rebuildAll = false}) async {
     try {
-      AppLogger.info('NotificationSyncService', 'Starting schedule reconciliation...');
-
-      final currentTimezone = DateTime.now().timeZoneName;
-      final timezoneChanged = _lastKnownTimezone != null && _lastKnownTimezone != currentTimezone;
-      _lastKnownTimezone = currentTimezone;
-
-      final activeRoutines = await _routineRepository.getAllActive();
-
-      if (timezoneChanged || rebuildAll) {
-        AppLogger.info('NotificationSyncService', 'Rebuilding notification schedules for $currentTimezone.');
-        await _scheduler.rescheduleAll(activeRoutines);
-      } else {
-        // Refresh schedules for all active routines
-        for (final routine in activeRoutines) {
-          await _scheduler.scheduleRoutine(routine);
-        }
-      }
-
-      AppLogger.info('NotificationSyncService', 'Reconciliation finished successfully.');
-    } catch (e, st) {
-      AppLogger.error('NotificationSyncService', 'Reconciliation error', e, st);
+      // The scheduler reloads inside its queue, checks the actual IANA timezone,
+      // prunes obsolete IDs, and verifies each routine without cancelling valid
+      // due alarms. Legacy payloads are rebuilt once after upgrading.
+      await _scheduler.rescheduleAll(await _routineRepository.getAllActive());
+      AppLogger.info(
+        'NotificationSyncService',
+        'Schedule reconciliation verified',
+      );
+    } catch (error, stack) {
+      AppLogger.error(
+        'NotificationSyncService',
+        'Reconciliation error',
+        error,
+        stack,
+      );
     }
   }
 }

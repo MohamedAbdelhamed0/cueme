@@ -58,7 +58,9 @@ final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
 
 // Platform Services
 final reminderSchedulerProvider = Provider<ReminderScheduler>((ref) {
-  return FlutterLocalNotificationScheduler();
+  return FlutterLocalNotificationScheduler(
+    routineRepository: ref.watch(routineRepositoryProvider),
+  );
 });
 
 final notificationIdServiceProvider = Provider<NotificationIdService>((ref) {
@@ -85,7 +87,9 @@ final permissionServiceProvider = Provider<PermissionService>((ref) {
   return PermissionService();
 });
 
-final notificationSyncServiceProvider = Provider<NotificationSyncService>((ref) {
+final notificationSyncServiceProvider = Provider<NotificationSyncService>((
+  ref,
+) {
   return NotificationSyncService(
     ref.watch(routineRepositoryProvider),
     ref.watch(reminderSchedulerProvider),
@@ -106,10 +110,14 @@ final appSettingsStreamProvider = StreamProvider<AppSettings>((ref) {
 });
 
 // Today timeline occurrences stream
-final todayOccurrencesProvider = FutureProvider<List<TodayOccurrence>>((ref) async {
+final todayOccurrencesProvider = FutureProvider<List<TodayOccurrence>>((
+  ref,
+) async {
   final routinesAsync = ref.watch(activeRoutinesStreamProvider);
   final routines = routinesAsync.value ?? [];
-  final historyEntries = await ref.watch(historyRepositoryProvider).getTodayEntries();
+  final historyEntries = await ref
+      .watch(historyRepositoryProvider)
+      .getTodayEntries();
 
   return OccurrenceCalculator.computeOccurrences(
     routines: routines,

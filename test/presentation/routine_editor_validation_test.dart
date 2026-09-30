@@ -16,10 +16,7 @@ void main() {
     });
 
     test('Empty or whitespace name fails validation', () {
-      final draft = RoutineDraft(
-        name: '   ',
-        startDate: DateTime(2026, 9, 1),
-      );
+      final draft = RoutineDraft(name: '   ', startDate: DateTime(2026, 9, 1));
 
       expect(draft.validate(), contains('Routine name is required'));
     });
@@ -63,8 +60,23 @@ void main() {
         ],
       );
 
-      expect(draft.validate(), contains('Duplicate reminder times are not allowed'));
+      expect(
+        draft.validate(),
+        contains('Duplicate reminder times are not allowed'),
+      );
     });
+
+    test(
+      'Same calendar start/end day is valid regardless of time component',
+      () {
+        final draft = RoutineDraft(
+          name: 'Test',
+          startDate: DateTime(2026, 9, 30, 18),
+          endDate: DateTime(2026, 9, 30),
+        );
+        expect(draft.validate(), isNull);
+      },
+    );
 
     test('End date before start date fails validation', () {
       final draft = RoutineDraft(
@@ -73,7 +85,10 @@ void main() {
         endDate: DateTime(2026, 9, 5),
       );
 
-      expect(draft.validate(), contains('End date cannot be earlier than start date'));
+      expect(
+        draft.validate(),
+        contains('End date cannot be earlier than start date'),
+      );
     });
   });
 }
